@@ -3,55 +3,60 @@ import pandas as pd
 import plotly.express as px
 from sqlalchemy import create_engine
 
-# --- 1. Database Setup & Data Loading ---
+# --- 1. Database Setup ---
 # Securely load the Neon connection string from Streamlit Secrets
 engine = create_engine(st.secrets["NEON_URI"])
 
-def setup_database():
-    """Initializes the database with sample parsed data from the NY CEO Survey."""
-    data = [
-        {"Question": "Q2. Current Business Conditions", "Response": "Better", "Segment": "Total", "Percentage": 11},
-        {"Question": "Q2. Current Business Conditions", "Response": "About the same", "Segment": "Total", "Percentage": 24},
-        {"Question": "Q2. Current Business Conditions", "Response": "A little worse", "Segment": "Total", "Percentage": 43},
-        {"Question": "Q2. Current Business Conditions", "Response": "Considerably worse", "Segment": "Total", "Percentage": 22},
-        {"Question": "Q6. Revenue Expectations", "Response": "Grow", "Segment": "Total", "Percentage": 33},
-        {"Question": "Q6. Revenue Expectations", "Response": "Stay the same", "Segment": "Total", "Percentage": 39},
-        {"Question": "Q6. Revenue Expectations", "Response": "Decrease", "Segment": "Total", "Percentage": 27},
-        {"Question": "Q15. Gov Focus Areas", "Response": "Business Income Tax Reform", "Segment": "Total", "Percentage": 57},
-        {"Question": "Q15. Gov Focus Areas", "Response": "Personal Income Tax Reform", "Segment": "Total", "Percentage": 50},
-        {"Question": "Q15. Gov Focus Areas", "Response": "Spending Cuts", "Segment": "Total", "Percentage": 50},
-    ]
-    
-    df = pd.DataFrame(data)
-    # Write to Neon Postgres
-    df.to_sql("survey_data", engine, if_exists="replace", index=False)
-
 def load_data():
     """Fetches data from the Neon database."""
-    query = "SELECT * FROM survey_data"
-    return pd.read_sql(query, engine)
-
-# Initialize DB (Writes the sample data to Neon)
-setup_database()
-df = load_data()
+    try:
+        query = "SELECT * FROM survey_data"
+        return pd.read_sql(query, engine)
+    except Exception:
+        # Returns empty dataframe if table doesn't exist yet
+        return pd.DataFrame() 
 
 # --- 2. Streamlit User Interface ---
 st.set_page_config(page_title="NY CEO Survey Dashboard", layout="wide")
 st.title("📊 NY CEO 2025 Survey Dashboard")
 st.markdown("Interactive filtering and charting for the Siena Research Institute NY CEO Survey.")
 
-# --- 3. Filter Interface ---
+# --- 3. Admin: Data Loader ---
+st.sidebar.header("⚙️ Admin: Load Database")
+uploaded_file = st.sidebar.file_uploader("Upload Cleaned CSV", type=["csv"])
+
+if uploaded_file is not None:
+    if st.sidebar.button("Push to Neon DB"):
+        with st.spinner("Uploading to database..."):
+            new_df = pd.read_csv(uploaded_file)
+            # This overwrites the existing table with your new CSV data
+            new_df.to_sql("survey_data", engine, if_exists="replace", index=False)
+        st.sidebar.success("Database updated successfully!")
+        st.rerun()
+
+st.sidebar.markdown("---")
+
+# --- 4. Main App Logic ---
+df = load_data()
+
+if df.empty:
+    st.info("👋 Welcome! The database is currently empty. Please upload a CSV using the sidebar to get started.")
+    st.stop()
+
 st.sidebar.header("Filter Options")
 
+# Filter by Question
 questions = df['Question'].unique()
 selected_question = st.sidebar.selectbox("Select a Question", questions)
 
+# Filter by Segment (Region, Industry, Total, etc.)
 segments = df[df['Question'] == selected_question]['Segment'].unique()
 selected_segment = st.sidebar.selectbox("Select Segment/Demographic", segments)
 
+# Apply filters
 filtered_df = df[(df['Question'] == selected_question) & (df['Segment'] == selected_segment)]
 
-# --- 4. Graphing and Charting ---
+# --- 5. Graphing and Charting ---
 st.subheader(f"{selected_question} ({selected_segment})")
 
 if not filtered_df.empty:
@@ -75,6 +80,3 @@ if not filtered_df.empty:
         st.dataframe(filtered_df, use_container_width=True)
 else:
     st.warning("No data available for this selection.")
-
-
-
